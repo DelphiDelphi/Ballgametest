@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Void Game</title>
+    <style>
+        /* CSS部分 */
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Orbitron', sans-serif;
+            color: white;
+            user-select: none;
+        }
+
+        #canvas {
+            display: block;
+        }
+
+        #game-ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #score-label {
+            position: absolute;
+            top: 20px;
+            left: 30px;
+            font-size: 24px;
+            margin: 0;
+            text-shadow: 0 0 10px #0ff;
+        }
+
+        #start-screen, #game-over-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: auto;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 40px;
+            border: 1px solid #0ff;
+            box-shadow: 0 0 20px #0ff;
+            border-radius: 10px;
+        }
+
+        #title {
+            font-size: 60px;
+            margin: 0 0 20px 0;
+            color: #0ff;
+            text-shadow: 0 0 20px #0ff;
+        }
+
+        .sub {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        h2 {
+            font-size: 48px;
+            color: #f05;
+            text-shadow: 0 0 20px #f05;
+            margin: 0 0 20px 0;
+        }
+
+        button {
+            background: transparent;
+            border: 1px solid #0ff;
+            color: #0ff;
+            padding: 10px 30px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 18px;
+            cursor: pointer;
+            transition: 0.3s;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background: #0ff;
+            color: #000;
+            box-shadow: 0 0 20px #0ff;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-ui">
+        <h1 id="title">NEON VOID</h1>
+        <p id="score-label">SCORE: <span id="score">0</span></p>
+        <div id="start-screen">
+            <p>Click or Tap to Start</p>
+            <p class="sub">Move: Mouse | Shoot: Click</p>
+        </div>
+        <div id="game-over-screen" style="display: none;">
+            <h2>GAME OVER</h2>
+            <p>Final Score: <span id="final-score">0</span></p>
+            <button id="restart-btn">Try Again</button>
+        </div>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI Elements
+        const scoreEl = document.getElementById('score');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const finalScoreEl = document.getElementById('final-score');
+        const restartBtn = document.getElementById('restart-btn');
+
+        // Game State
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let score = 0;
+        let animationId;
+        let isGameActive = false;
+
+        // Player Setup
+        class Player {
+            constructor(x, y, radius, color) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.color = color;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                // Glow effect
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = this.color;
+            }
+
+            update(mouse) {
+                const dx = mouse.x - this.x;
+                const dy = mouse.y - this.y;
+                this.x += dx * 0.1;
+                this.y += dy * 0.1;
+                this.draw();
+            }
+        }
+
+        // Projectile Setup
+        class Projectile {
+            constructor(x, y, radius, color, velocity) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.color = color;
+                this.velocity = velocity;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = this.color;
+            }
+
+            update() {
+                this.x = this.x + this.velocity.x;
+                this.y = this.y + this.velocity.y;
+                this.draw();
+            }
+        }
+
+        // Enemy Setup
+        class Enemy {
+            constructor(x, y, radius, color, velocity) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.color = color;
+                this.velocity = velocity;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = this.color;
+            }
+
+            update() {
+                this.x = this.x + this.velocity.x;
+                this.y = this.y + this.velocity.y;
+                this.draw();
+            }
+        }
+
+        // Particle Explosion Setup
+        const friction = 0.98;
+        class Particle {
+            constructor(x, y, radius, color, velocity) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.color = color;
+                this.velocity = velocity;
+                this.alpha = 1;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.restore();
+            }
+
+            update() {
+                this.velocity.x *= friction;
+                this.velocity.y *= friction;
+                this.x = this.x + this.velocity.x;
+                this.y = this.y + this.velocity.y;
+                this.alpha -= 0.02;
+                this.draw();
+            }
+        }
+
+        // Variables
+        let player;
+        let projectiles = [];
+        let enemies = [];
+        let particles = [];
+        let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+
+        function init() {
+            player = new Player(canvas.width / 2, canvas.height / 2, 15, '#0ff');
+            projectiles = [];
+            enemies = [];
+            particles = [];
+            score = 0;
+            scoreEl.innerHTML = score;
+            isGameActive = true;
+            animate();
+            spawnEnemies();
+        }
+
+        let spawnInterval;
+        function spawnEnemies() {
+            if(spawnInterval) clearInterval(spawnInterval);
+            spawnInterval = setInterval(() => {
+                if (!isGameActive) return;
+
+                const radius = Math.random() * (30 - 10) + 10;
+                let x;
+                let y;
+
+                if (Math.random() < 0.5) {
+                    x = Math.random() < 0.5 ? 0 - radius : canvas.width + radius;
+                    y = Math.random() * canvas.height;
+                } else {
+                    x = Math.random() * canvas.width;
+                    y = Math.random() < 0.5 ? 0 - radius : canvas.height + radius;
+                }
+
+                const color = `hsl(${Math.random() * 30 + 330}, 100%, 50%)`;
+                const angle = Math.atan2(canvas.height / 2 - y, canvas.width / 2 - x);
+                const velocity = {
+                    x: Math.cos(angle),
+                    y: Math.sin(angle)
+                };
+
+                enemies.push(new Enemy(x, y, radius, color, velocity));
+            }, 1000);
+        }
+
+        function animate() {
+            if (!isGameActive) return;
+            animationId = requestAnimationFrame(animate);
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.2)'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            player.update(mouse);
+
+            particles.forEach((particle, index) => {
+                if (particle.alpha <= 0) {
+                    particles.splice(index, 1);
+                } else {
+                    particle.update();
+                }
+            });
+
+            projectiles.forEach((projectile, index) => {
+                projectile.update();
+                if (
+                    projectile.x + projectile.radius < 0 ||
+                    projectile.x - projectile.radius > canvas.width ||
+                    projectile.y + projectile.radius < 0 ||
+                    projectile.y - projectile.radius > canvas.height
+                ) {
+                    setTimeout(() => {
+                        projectiles.splice(index, 1);
+                    }, 0);
+                }
+            });
+
+            enemies.forEach((enemy, index) => {
+                enemy.update();
+
+                const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+
+                if (dist - enemy.radius - player.radius < 1) {
+                    cancelAnimationFrame(animationId);
+                    clearInterval(spawnInterval);
+                    isGameActive = false;
+                    gameOverScreen.style.display = 'block';
+                    finalScoreEl.innerHTML = score;
+                }
+
+                projectiles.forEach((projectile, pIndex) => {
+                    const dist = Math.hypot(projectile.x - enemy.x, projectile.y - enemy.y);
+
+                    if (dist - enemy.radius - projectile.radius < 1) {
+                        for (let i = 0; i < enemy.radius * 2; i++) {
+                            particles.push(new Particle(
+                                projectile.x, 
+                                projectile.y, 
+                                Math.random() * 2, 
+                                enemy.color, 
+                                {
+                                    x: (Math.random() - 0.5) * (Math.random() * 6),
+                                    y: (Math.random() - 0.5) * (Math.random() * 6)
+                                }
+                            ));
+                        }
+
+                        if (enemy.radius - 10 > 10) {
+                            score += 100;
+                            scoreEl.innerHTML = score;
+                            enemy.radius -= 10;
+                            setTimeout(() => {
+                                projectiles.splice(pIndex, 1);
+                            }, 0);
+                        } else {
+                            score += 250;
+                            scoreEl.innerHTML = score;
+                            setTimeout(() => {
+                                enemies.splice(index, 1);
+                                projectiles.splice(pIndex, 1);
+                            }, 0);
+                        }
+                    }
+                });
+            });
+        }
+
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = event.clientX;
+            mouse.y = event.clientY;
+        });
+
+        window.addEventListener('touchmove', (event) => {
+            event.preventDefault();
+            mouse.x = event.touches[0].clientX;
+            mouse.y = event.touches[0].clientY;
+        }, { passive: false });
+
+        window.addEventListener('click', (event) => {
+            if (!isGameActive) return;
+            const angle = Math.atan2(event.clientY - player.y, event.clientX - player.x);
+            const velocity = {
+                x: Math.cos(angle) * 5,
+                y: Math.sin(angle) * 5
+            };
+            projectiles.push(new Projectile(player.x, player.y, 5, '#fff', velocity));
+        });
+
+        startScreen.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            init();
+        });
+
+        restartBtn.addEventListener('click', () => {
+            gameOverScreen.style.display = 'none';
+            init();
+        });
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            init(); // リサイズ時にリセット
+        });
+    </script>
+</body>
+</html>
